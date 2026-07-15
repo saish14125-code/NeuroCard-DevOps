@@ -99,6 +99,16 @@ KEYWORD_OVERRIDES = {
     "airlines": "travel", "airport": "travel", "railway": "travel",
     "metro card": "travel",
 
+    # long-tail terms seen in real statement narrations
+    "juice": "dining", "ice cream": "dining", "sweets": "dining",
+    "bakery": "dining", "cafe": "dining", "tiffin": "dining",
+    "farsan": "dining", "vada": "dining", "chinese": "dining",
+    "laundry": "others", "salon": "others", "barber": "others",
+    "xerox": "others", "stationery": "others", "chemist": "others",
+    "uts direct": "travel", "fastag": "travel",
+    "general stor": "shopping", "supermarket": "shopping",
+    "kirana": "shopping", "provision": "shopping", "dairy": "shopping",
+
     "zomato": "dining", "swiggy": "dining", "kfc": "dining",
     "mcdonalds": "dining", "mcdonald": "dining", "burger king": "dining",
     "dominos": "dining", "domino": "dining", "pizza hut": "dining",
@@ -133,7 +143,7 @@ KEYWORD_OVERRIDES = {
 }
 
 def keyword_predict(merchant: str):
-    m = merchant.lower().strip()
+    m = str(merchant or "").lower().strip()
     for keyword, category in KEYWORD_OVERRIDES.items():
         if keyword in m:
             return category
@@ -271,6 +281,9 @@ load_or_train_models()
 
 def smart_predict(merchant: str):
     """Rules first, ML fallback. Returns (category, confidence)."""
+    merchant = str(merchant or "").strip()
+    if not merchant or merchant.lower() == "nan":
+        return "others", 0.5
     override = keyword_predict(merchant)
     if override:
         return override, 1.0
@@ -915,29 +928,47 @@ async def upload_statement(user_id: str = Form(...), file: UploadFile = File(...
     else:
         df = pd.DataFrame(columns=["user", "date", "merchant", "amount", "paid_using", "points_earned"])
 
-    rows = []
+    rows, kept, skipped_transfers, skipped_p2p = [], [], 0, 0
     for t in txns:
+        if t.get("is_transfer"):
+            skipped_transfers += 1
+            continue
+        if t.get("maybe_person"):
+            # person-shaped name: keep it only if the classifier actually
+            # recognizes it as a merchant (keyword hit or confident ML call)
+            cat, conf = smart_predict(t["merchant"])
+            if keyword_predict(t["merchant"]) is None and conf < 0.65:
+                skipped_p2p += 1
+                continue
+        kept.append(t)
         rows.append({
             "user": user_id, "date": t["date"], "merchant": t["merchant"],
             "amount": t["amount"], "paid_using": "Statement Upload", "points_earned": 0,
         })
+    if not rows:
+        return {"error": "Statement parsed, but every debit looked like a transfer/P2P payment — nothing card-routable to analyze."}
     df = pd.concat([df, pd.DataFrame(rows)], ignore_index=True)
     df.to_csv(file_path, index=False)
 
     # quick classification preview so the user sees it worked
     preview = []
-    for t in txns[:8]:
+    for t in kept[:8]:
         cat, conf = smart_predict(t["merchant"])
         preview.append({"merchant": t["merchant"], "raw": t["merchant_raw"],
                         "amount": t["amount"], "category": cat, "confidence": conf})
     _INSIGHT_CACHE.pop(user_id, None)  # force fresh AI insight for real data
-    return {"status": "success", "imported": len(txns), "replaced_synthetic": replace,
+    return {"status": "success", "imported": len(rows), "replaced_synthetic": replace,
+            "skipped_transfers": skipped_transfers, "skipped_p2p": skipped_p2p,
             "preview": preview}
 
 @app.get("/rewards-analysis/{user_id}")
 def rewards_analysis(user_id: str):
-    """Per-card ROI: is each card in the wallet paying for itself?
-    Uses the card's REAL rates/caps against the user's actual per-card spend."""
+    """Per-card ROI under SMART ROUTING.
+    Statements don't say which card paid for what — and single-card statements
+    would be trivial anyway. So instead of pretending, we answer the question
+    that actually matters: if you routed each spending category to whichever
+    of YOUR cards earns most on it (what Smart-Swipe teaches you to do), what
+    would each card earn, and does that beat its fee?"""
     if not os.path.exists(p('transactions.csv')):
         return {"error": "No transactions"}
     df = pd.read_csv(p('transactions.csv'))
@@ -946,52 +977,66 @@ def rewards_analysis(user_id: str):
         return {"error": "User not found"}
 
     user_df['category'] = user_df['merchant'].apply(lambda m: smart_predict(m)[0])
+    summary = {c: 0.0 for c in CATEGORIES}
+    summary.update({k: float(v) for k, v in user_df.groupby('category')['amount'].sum().items()})
+
     meta = get_users_meta().get(user_id, {})
     owned = meta.get("owned_cards", [])
     all_cards = {c.get("card_name"): c for c in get_all_cards()}
+    wallet = {n: all_cards[n] for n in owned if n in all_cards}
+    if not wallet:
+        return {"cards": []}
+
+    # Route each category to the wallet card that earns the most on it
+    routing = {}   # category -> (card_name, annual value)
+    for cat in CATEGORIES:
+        if summary.get(cat, 0) <= 0:
+            continue
+        best_name, best_val = None, 0.0
+        for name, card in wallet.items():
+            v = capped_category_value(card, cat, summary[cat])
+            if v > best_val:
+                best_name, best_val = name, v
+        if best_name:
+            routing[cat] = (best_name, best_val)
 
     cards_out = []
-    for name in owned:
-        card = all_cards.get(name)
-        if not card:
-            continue
-        card_df = user_df[user_df['paid_using'] == name]
-        spend_by_cat = card_df.groupby('category')['amount'].sum().to_dict()
-        card_spend = float(card_df['amount'].sum())
-        # value this card earned on its own transactions (cap-aware)
-        earned = sum(capped_category_value(card, cat, amt) for cat, amt in spend_by_cat.items())
-        # value the user's ENTIRE spend would earn on this card (potential)
-        total_by_cat = user_df.groupby('category')['amount'].sum().to_dict()
-        potential = sum(capped_category_value(card, cat, amt) for cat, amt in total_by_cat.items())
+    for name, card in wallet.items():
+        assigned = [cat for cat, (winner, _) in routing.items() if winner == name]
+        routed_spend = sum(summary[cat] for cat in assigned)
+        optimal_value = sum(val for cat, (winner, val) in routing.items() if winner == name)
         fee = float(card.get("annual_fee", 0) or 0)
         waiver = float(card.get("fee_waiver_spend", 0) or 0)
-        roi = earned - fee
-        if fee == 0:
-            verdict = "Free card — pure upside. Keep it."
-        elif waiver > 0 and card_spend >= waiver:
-            verdict = f"Fee waived (spend ₹{int(card_spend):,} ≥ ₹{int(waiver):,}). Everything it earns is profit."
+        roi = optimal_value - fee
+
+        if fee == 0 and assigned:
+            verdict = f"Free card and your best pick for {', '.join(assigned)} — keep, zero downside."
+        elif fee == 0:
+            verdict = "Free card — never your best option, but it costs nothing to hold."
+        elif not assigned:
+            verdict = f"Never your best card for ANY category — its ₹{int(fee):,} fee is pure loss. Consider replacing it."
+        elif waiver > 0 and routed_spend >= waiver:
+            verdict = f"Routing {', '.join(assigned)} here crosses the ₹{int(waiver):,} waiver — fee-free and earning ₹{int(optimal_value):,}/yr."
         elif roi > 0:
-            verdict = f"Earning ₹{int(earned):,} vs ₹{int(fee):,} fee — paying for itself."
-        elif waiver > 0:
-            gap = waiver - card_spend
-            verdict = f"Spend ₹{int(gap):,} more on this card to waive the ₹{int(fee):,} fee."
+            verdict = f"Earns ₹{int(optimal_value):,}/yr on {', '.join(assigned)} vs ₹{int(fee):,} fee — worth keeping."
         else:
-            verdict = f"Costing you ₹{int(-roi):,}/yr — consider replacing it."
+            verdict = f"Even used optimally it earns ₹{int(optimal_value):,} vs a ₹{int(fee):,} fee — losing ₹{int(-roi):,}/yr."
+
         cards_out.append({
             "card_name": name, "bank_name": card.get("bank_name"),
-            "spend_on_card": int(card_spend),
-            "rewards_value_earned": int(earned),
+            "best_for": assigned,
+            "routed_spend": int(routed_spend),
+            "optimal_value": int(optimal_value),
             "annual_fee": int(fee),
             "fee_waiver_spend": int(waiver),
-            "waiver_progress_pct": min(100, round(card_spend / waiver * 100)) if waiver > 0 else 100,
+            "waiver_progress_pct": min(100, round(routed_spend / waiver * 100)) if waiver > 0 else 100,
             "roi": int(roi),
             "reward_type": card.get("reward_type", "points"),
             "point_value_rs": card.get("point_value_rs", 1.0),
-            "potential_if_all_spend": int(potential),
             "verdict": verdict,
         })
     cards_out.sort(key=lambda c: c["roi"], reverse=True)
-    return {"cards": cards_out}
+    return {"cards": cards_out, "routing": {cat: winner for cat, (winner, _) in routing.items()}}
 
 @app.get("/card-details/{card_name}")
 def card_details(card_name: str):

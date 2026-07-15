@@ -817,7 +817,7 @@ const App = () => {
             <div className="max-w-7xl mx-auto mb-8 border-b border-slate-200 flex gap-6 overflow-x-auto">
               {[
                 { id:'dashboard', icon:LayoutDashboard, label:'Analytics' },
-                { id:'rewards',   icon:Gift,            label:'Rewards & Chat' },
+                { id:'rewards',   icon:Gift,            label:'Card ROI & Advisor' },
                 { id:'wallet',    icon:Wallet,          label:'Wallet & Smart Swipe' },
                 { id:'strategy',  icon:TrendingUp,      label:'AI Strategy Lab' },
               ].map(tab => (
@@ -932,7 +932,10 @@ const App = () => {
                       <h3 className="font-black text-slate-800 text-lg mb-1 flex items-center gap-2">
                         <BarChart2 size={18} className="text-emerald-500"/> Card ROI Audit
                       </h3>
-                      <p className="text-xs text-slate-400 font-medium mb-5">Real reward rates + caps vs each card's fee — is every card in your wallet earning its keep?</p>
+                      <p className="text-xs text-slate-400 font-medium mb-5">
+                        Assumes smart routing: each spending category goes to whichever of YOUR cards earns the most on it.
+                        Does every card then justify its fee?
+                      </p>
                       {!rewardsAnalysis && <p className="text-xs text-slate-400">Analyzing your wallet…</p>}
                       {rewardsAnalysis && rewardsAnalysis.length === 0 && (
                         <p className="text-xs text-slate-400">Add cards to your wallet to see their ROI.</p>
@@ -943,20 +946,24 @@ const App = () => {
                             <div className="flex justify-between items-start mb-2">
                               <div>
                                 <p className="text-sm font-black text-slate-800">{c.card_name}</p>
-                                <p className="text-[9px] uppercase font-bold text-slate-400">{c.bank_name} • ₹{c.spend_on_card.toLocaleString()} spent via this card</p>
+                                <p className="text-[9px] uppercase font-bold text-slate-400">
+                                  {c.bank_name} • {c.best_for?.length
+                                    ? `best in wallet for: ${c.best_for.join(', ')}`
+                                    : 'not the best pick for any category'}
+                                </p>
                               </div>
                               <div className="text-right">
                                 <p className={`text-lg font-black ${c.roi >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
                                   {c.roi >= 0 ? '+' : '−'}₹{Math.abs(c.roi).toLocaleString()}
                                 </p>
-                                <p className="text-[8px] uppercase font-bold text-slate-400">net of fee</p>
+                                <p className="text-[8px] uppercase font-bold text-slate-400">per year, net of fee</p>
                               </div>
                             </div>
                             <div className="grid grid-cols-3 gap-2 mb-3">
                               {[
-                                { label:'Earned', val:`₹${c.rewards_value_earned.toLocaleString()}` },
+                                { label:'Would earn / yr', val:`₹${c.optimal_value.toLocaleString()}` },
                                 { label:'Annual Fee', val: c.annual_fee ? `₹${c.annual_fee.toLocaleString()}` : 'Free' },
-                                { label:'If all spend here', val:`₹${c.potential_if_all_spend.toLocaleString()}` },
+                                { label:'Spend routed here', val:`₹${c.routed_spend.toLocaleString()}` },
                               ].map(({label,val}) => (
                                 <div key={label} className="bg-white rounded-xl p-2 text-center border border-slate-100">
                                   <p className="text-[8px] uppercase font-bold text-slate-400">{label}</p>

@@ -23,6 +23,23 @@ import io
 import re
 import pandas as pd
 
+# Narration prefixes that are money movement, not card-routable spending:
+# fund transfers, account-to-account, ATM/cash withdrawals, self transfers.
+TRANSFER_PREFIXES = re.compile(
+    r"^\s*(FT-|A2A|IMPS[-/ ]|RTGS[-/ ]|NEFT[-/ ]|ATW[-/ ]|EAW[-/ ]|NWD[-/ ]|SELF\b|CASH\b|CHQ\b)", re.I)
+
+# Words that mark a UPI counterparty as a business, not a person
+BUSINESS_HINTS = re.compile(
+    r"\b(ENTERPRISES?|TRADERS?|STORES?|MART|BAZAA?R|SHOPP?E?|JUICE|CAFE|COFFEE|HOTEL|RESTAURANT|"
+    r"DHABA|FOODS?|SWEETS?|DAIRY|KIRANA|GENERAL|PROVISION|FRUITS?|VEGETABLES?|CHICKEN|MEDICAL|"
+    r"PHARMA\w*|CLINIC|HOSPITAL|SALON|GYM|FITNESS|ACADEMY|CLASSES|TOURS?|TRAVELS?|PETROL|FUEL|"
+    r"SERVICES?|SOLUTIONS?|AGENCY|STATIONER\w*|XEROX|BOOKS?|HARDWARE|MOBILE|TELECOM|ELECTRONICS?|"
+    r"FASHION|COLLECTIONS?|GARMENTS?|TAILOR|LAUNDRY|BAKERY|CATERERS?|PVT|LTD|LIMITED|LLP|INDIA|"
+    r"TECHNOLOG\w*|PAY\w*|RECHARGE|BROADBAND|CORP\w*|COMPANY|CO\b)", re.I)
+
+# A cleaned name that looks like "FIRSTNAME [MIDDLE] LASTNAME" with no business hint
+PERSON_NAME = re.compile(r"^[A-Za-z]+(?: [A-Za-z]+){1,3}$")
+
 DATE_HINTS = ("date",)
 DESC_HINTS = ("narration", "description", "particulars", "remarks", "details",
               "transaction remarks", "merchant", "transaction details")
@@ -141,11 +158,20 @@ def parse_statement(filename: str, blob: bytes) -> list[dict]:
         date = pd.to_datetime(str(r.get(date_col, "")), dayfirst=True, errors="coerce")
         if pd.isna(date):
             continue
+        merchant = clean_narration(desc)
+        is_transfer = bool(TRANSFER_PREFIXES.match(desc))
+        # UPI to an individual: name-shaped counterparty with no business words.
+        # Final call is made by the caller, who can consult the classifier.
+        maybe_person = (not is_transfer
+                        and bool(PERSON_NAME.match(merchant))
+                        and not BUSINESS_HINTS.search(merchant))
         out.append({
             "date": date.strftime("%Y-%m-%d %H:%M"),
-            "merchant": clean_narration(desc),
+            "merchant": merchant,
             "merchant_raw": desc[:120],
             "amount": round(amount, 2),
+            "is_transfer": is_transfer,
+            "maybe_person": maybe_person,
         })
     if not out:
         raise ValueError("Parsed the file but found no debit transactions")
