@@ -1,0 +1,36 @@
+# Secrets — NEVER commit
+backend/.env
+.env
+
+# User data (contains personal info / password hashes)
+backend/users.json
+backend/transactions.csv
+
+# Generated / large data
+backend/*.joblib
+backend/synthetic_transactions_full.csv
+backend/NeuroCard_Data.backup.csv
+backend/NeuroCard_Data_corrupt.csv
+backend/NeuroCard_Data_legacy.csv
+backend/review_queue.jsonl
+backend/__pycache__/
+__pycache__/
+*.pyc
+
+# Frontend
+node_modules/
+credit-ai-ui/build/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# College report/presentation (large binaries, not code)
+*.pptx
+*.docx
+
+# Stale root-level copies (real files live in backend/)
+/NeuroCard_Data.csv
+/package.json
+/package-lock.json
+/run.bat
