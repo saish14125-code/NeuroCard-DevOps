@@ -223,7 +223,8 @@ RULES:
   Super_Premium (10000+) — adjust if the text clearly positions it otherwise.
 - eligibility_level: Low/Medium/High/Elite matching the tier.
 - reward_type: cashback | points | miles | neucoins | coins.
-- highlights: 3-5 short selling points separated by "|", include cap warnings.
+- highlights: 3-5 short selling points separated by "|", include cap warnings AND
+  the points-earning structure when stated (e.g. "4 RP per Rs.150 spent, 1 RP = Rs.0.50").
 - exclusions: comma-separated spend types that earn nothing.
 - welcome_benefit / milestone_benefit: one concise sentence each, "" if none.
 - lounge_domestic_yr / lounge_intl_yr: visits per year; 99 means unlimited.

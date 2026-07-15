@@ -75,7 +75,8 @@ CATEGORIES = sorted(VALID_CATEGORIES)
 
 PERSONAS = [
     "The Epicurean Hunter", "The Global Jetsetter", "The Lifestyle Curator",
-    "The Highway Commuter", "The Pragmatic Saver", "The Balanced Strategist"
+    "The Highway Commuter", "The Pragmatic Saver", "The Balanced Strategist",
+    "The Weekend Explorer", "The Family Anchor", "The Campus Hustler",
 ]
 
 # ── BUILT-IN FALLBACK (used only if no CSV found at all) ──────────────────────
@@ -323,12 +324,15 @@ def train_persona_model():
     np.random.seed(42)
 
     persona_centers = np.array([
-        [0.45, 0.10, 0.20, 0.08, 0.10, 0.07],
-        [0.12, 0.50, 0.15, 0.07, 0.09, 0.07],
-        [0.15, 0.08, 0.50, 0.05, 0.12, 0.10],
-        [0.10, 0.08, 0.12, 0.45, 0.15, 0.10],
-        [0.12, 0.07, 0.15, 0.08, 0.45, 0.13],
-        [0.18, 0.17, 0.20, 0.15, 0.16, 0.14],
+        [0.45, 0.10, 0.20, 0.08, 0.10, 0.07],   # Epicurean Hunter
+        [0.12, 0.50, 0.15, 0.07, 0.09, 0.07],   # Global Jetsetter
+        [0.15, 0.08, 0.50, 0.05, 0.12, 0.10],   # Lifestyle Curator
+        [0.10, 0.08, 0.12, 0.45, 0.15, 0.10],   # Highway Commuter
+        [0.12, 0.07, 0.15, 0.08, 0.45, 0.13],   # Pragmatic Saver
+        [0.18, 0.17, 0.20, 0.15, 0.16, 0.14],   # Balanced Strategist
+        [0.28, 0.30, 0.15, 0.07, 0.10, 0.10],   # Weekend Explorer
+        [0.10, 0.05, 0.30, 0.12, 0.28, 0.15],   # Family Anchor
+        [0.25, 0.12, 0.33, 0.02, 0.18, 0.10],   # Campus Hustler
     ])
 
     print("  Generating persona training vectors (Dirichlet sampling)...")
@@ -341,7 +345,8 @@ def train_persona_model():
     all_data = np.vstack(cluster_data)
     np.random.shuffle(all_data)
 
-    model = KMeans(n_clusters=6, random_state=42, n_init=30, max_iter=500, algorithm='lloyd')
+    # seeded with persona centroids so cluster i == PERSONAS[i], guaranteed
+    model = KMeans(n_clusters=len(PERSONAS), init=persona_centers, n_init=1, max_iter=500, random_state=42)
     model.fit(all_data)
 
     print(f"\n  📊 K-Means Clustering Results")

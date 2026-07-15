@@ -26,7 +26,12 @@ import pandas as pd
 # Narration prefixes that are money movement, not card-routable spending:
 # fund transfers, account-to-account, ATM/cash withdrawals, self transfers.
 TRANSFER_PREFIXES = re.compile(
-    r"^\s*(FT-|A2A|IMPS[-/ ]|RTGS[-/ ]|NEFT[-/ ]|ATW[-/ ]|EAW[-/ ]|NWD[-/ ]|SELF\b|CASH\b|CHQ\b)", re.I)
+    r"^\s*(FT-|A2A|TPT-|IMPS[-/ ]|RTGS[-/ ]|NEFT[-/ ]|ATW[-/ ]|EAW[-/ ]|NWD[-/ ]|"
+    r"IB\s+FUNDS|FD\s+THROUGH|SELF\b|CASH\b|CHQ\b)", re.I)
+
+# A masked account number anywhere in the narration ("XXXXXXX7525") means a
+# transfer to another bank account — never card-routable spending.
+MASKED_ACCOUNT = re.compile(r"\bX{4,}\d{2,}\b", re.I)
 
 # Words that mark a UPI counterparty as a business, not a person
 BUSINESS_HINTS = re.compile(
@@ -159,7 +164,7 @@ def parse_statement(filename: str, blob: bytes) -> list[dict]:
         if pd.isna(date):
             continue
         merchant = clean_narration(desc)
-        is_transfer = bool(TRANSFER_PREFIXES.match(desc))
+        is_transfer = bool(TRANSFER_PREFIXES.match(desc)) or bool(MASKED_ACCOUNT.search(desc))
         # UPI to an individual: name-shaped counterparty with no business words.
         # Final call is made by the caller, who can consult the classifier.
         maybe_person = (not is_transfer

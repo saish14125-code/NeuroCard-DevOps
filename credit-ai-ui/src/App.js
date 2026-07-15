@@ -535,6 +535,13 @@ const App = () => {
     finally { setUploadBusy(false); e.target.value=''; }
   };
 
+  const handleCategoryCorrection = async (merchant, category) => {
+    try {
+      await axios.post(`${API}/set-category`, { user_id: currentUser, merchant, category });
+      fetchProfile(currentUser);   // reclassify everything with the new rule
+    } catch(e) { console.error(e); }
+  };
+
   const handleSliderChange = (cat, val) => setSliders({ ...sliders, [cat]:parseInt(val) });
   const runManualAI = async () => {
     try {
@@ -840,7 +847,10 @@ const App = () => {
                         <span className="text-[9px] font-black uppercase tracking-widest">NeuroCard AI Active</span>
                       </div>
                       <p className="text-white/70 text-[10px] font-bold uppercase tracking-[0.2em] mb-1 relative z-10">Your Spending Persona</p>
-                      <h4 className="text-3xl font-black mb-4 tracking-tight leading-none relative z-10">{data.info.persona}</h4>
+                      <h4 className="text-3xl font-black mb-1 tracking-tight leading-none relative z-10">{data.info.persona}</h4>
+                      {data.info.persona_reason && (
+                        <p className="text-white/60 text-[10px] font-bold mb-3 relative z-10">{data.info.persona_reason}</p>
+                      )}
                       <div className="bg-black/10 backdrop-blur-sm p-4 rounded-2xl border border-white/10 relative z-10">
                         <p className="text-white/80 text-[10px] font-bold uppercase mb-2">💬 AI Insight</p>
                         <p className="text-white text-sm font-medium leading-relaxed">{data.info.description}</p>
@@ -906,7 +916,11 @@ const App = () => {
                             <div>
                               <p className="text-sm font-bold text-slate-800">{t.merchant}</p>
                               <p className="text-[9px] text-slate-400 font-black uppercase">{t.date}</p>
-                              <span className={`text-[8px] uppercase font-bold ${col.text} ${col.badge} px-1.5 py-0.5 rounded-md mt-0.5 inline-block`}>{t.category}</span>
+                              <select value={t.category} title="Wrong category? Fix it — the app remembers forever"
+                                onChange={e=>handleCategoryCorrection(t.merchant, e.target.value)}
+                                className={`text-[8px] uppercase font-bold ${col.text} ${col.badge} px-1 py-0.5 rounded-md mt-0.5 inline-block border-0 outline-none cursor-pointer appearance-auto`}>
+                                {['dining','travel','shopping','fuel','utility','others'].map(c=><option key={c} value={c}>{c}</option>)}
+                              </select>
                             </div>
                           </div>
                           <div className="text-right flex-shrink-0">
@@ -988,20 +1002,24 @@ const App = () => {
                       </div>
                     </div>
 
-                    {/* Points by card */}
+                    {/* Projected annual rewards under smart routing */}
                     <div className="bg-white border border-slate-200 p-6 rounded-[32px] shadow-sm">
-                      <h3 className="text-slate-800 font-bold mb-4 flex items-center gap-2">
-                        <CreditCard size={16} className="text-blue-500"/> Points by Card
+                      <h3 className="text-slate-800 font-bold mb-1 flex items-center gap-2">
+                        <CreditCard size={16} className="text-blue-500"/> Projected Rewards by Card
                       </h3>
+                      <p className="text-[10px] text-slate-400 font-medium mb-4">What each card earns per year if you follow the routing plan above.</p>
                       <div className="space-y-3">
-                        {Object.entries(data.points_summary).map(([card, points]) => {
-                          const total = Object.values(data.points_summary).reduce((a,b)=>a+b,0)||1;
-                          const pct = (points/total)*100;
+                        {rewardsAnalysis?.filter(c=>c.optimal_value>0).map(c => {
+                          const total = rewardsAnalysis.reduce((a,x)=>a+x.optimal_value,0)||1;
+                          const pct = (c.optimal_value/total)*100;
                           return (
-                            <div key={card} className="space-y-1">
+                            <div key={c.card_name} className="space-y-1">
                               <div className="flex justify-between text-xs">
-                                <span className="font-bold text-slate-700 truncate max-w-[70%]">{card}</span>
-                                <span className="font-black text-emerald-600">{points.toLocaleString()} pts</span>
+                                <span className="font-bold text-slate-700 truncate max-w-[60%]">{c.card_name}</span>
+                                <span className="font-black text-emerald-600">
+                                  ₹{c.optimal_value.toLocaleString()}/yr
+                                  {c.reward_type !== 'cashback' && ` (~${c.projected_points.toLocaleString()} ${c.reward_type})`}
+                                </span>
                               </div>
                               <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
                                 <div className="h-full bg-emerald-400 rounded-full" style={{ width:`${pct}%` }}/>
@@ -1009,6 +1027,9 @@ const App = () => {
                             </div>
                           );
                         })}
+                        {rewardsAnalysis && rewardsAnalysis.every(c=>c.optimal_value===0) && (
+                          <p className="text-xs text-slate-400">No projected rewards yet — add cards or upload a statement.</p>
+                        )}
                       </div>
                     </div>
                   </div>

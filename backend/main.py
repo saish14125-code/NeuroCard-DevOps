@@ -103,6 +103,11 @@ KEYWORD_OVERRIDES = {
     "juice": "dining", "ice cream": "dining", "sweets": "dining",
     "bakery": "dining", "cafe": "dining", "tiffin": "dining",
     "farsan": "dining", "vada": "dining", "chinese": "dining",
+    "chicken": "dining", "biryani": "dining", "momos": "dining",
+    "shawarma": "dining", "eatery": "dining", "snacks": "dining",
+    "valve corporation": "shopping", "valve": "shopping", "steam games": "shopping",
+    "playstation": "shopping", "xbox": "shopping", "epic games": "shopping",
+    "riot games": "shopping", "nintendo": "shopping", "google play": "shopping",
     "laundry": "others", "salon": "others", "barber": "others",
     "xerox": "others", "stationery": "others", "chemist": "others",
     "uts direct": "travel", "fastag": "travel",
@@ -142,8 +147,37 @@ KEYWORD_OVERRIDES = {
     "gym": "others", "hospital": "others", "clinic": "others",
 }
 
+# ── USER CATEGORY CORRECTIONS ────────────────────────────────────────────────
+# When a user re-categorizes a transaction, the merchant→category mapping is
+# saved here permanently and takes priority over everything else. This is the
+# app's learning loop: every correction improves all future classifications.
+_OVERRIDE_CACHE = {"mtime": None, "data": {}}
+
+def get_user_overrides():
+    path = p('user_categories.json')
+    if not os.path.exists(path):
+        return {}
+    mtime = os.path.getmtime(path)
+    if _OVERRIDE_CACHE["mtime"] != mtime:
+        with open(path, 'r', encoding='utf-8') as f:
+            _OVERRIDE_CACHE["data"] = json.load(f)
+        _OVERRIDE_CACHE["mtime"] = mtime
+    return _OVERRIDE_CACHE["data"]
+
+def save_user_override(merchant: str, category: str):
+    overrides = get_user_overrides()
+    overrides[str(merchant).lower().strip()] = category
+    with open(p('user_categories.json'), 'w', encoding='utf-8') as f:
+        json.dump(overrides, f, indent=2, ensure_ascii=False)
+
 def keyword_predict(merchant: str):
     m = str(merchant or "").lower().strip()
+    overrides = get_user_overrides()
+    if m in overrides:
+        return overrides[m]
+    for keyword, category in overrides.items():   # user words also match as substrings
+        if keyword in m:
+            return category
     for keyword, category in KEYWORD_OVERRIDES.items():
         if keyword in m:
             return category
@@ -157,7 +191,23 @@ def keyword_predict(merchant: str):
 CATEGORIES = ["dining", "travel", "shopping", "fuel", "utility", "others"]
 PERSONAS = [
     "The Epicurean Hunter", "The Global Jetsetter", "The Lifestyle Curator",
-    "The Highway Commuter", "The Pragmatic Saver", "The Balanced Strategist"
+    "The Highway Commuter", "The Pragmatic Saver", "The Balanced Strategist",
+    "The Weekend Explorer", "The Family Anchor", "The Campus Hustler",
+]
+
+# spend-fraction centroids [dining, travel, shopping, fuel, utility, others]
+# K-Means is SEEDED with these (init=centers, n_init=1) so cluster i is
+# guaranteed to mean PERSONAS[i] — plain KMeans numbers clusters arbitrarily.
+PERSONA_CENTERS = [
+    [0.45, 0.10, 0.20, 0.08, 0.10, 0.07],   # Epicurean Hunter — dining first
+    [0.12, 0.50, 0.15, 0.07, 0.09, 0.07],   # Global Jetsetter — travel first
+    [0.15, 0.08, 0.50, 0.05, 0.12, 0.10],   # Lifestyle Curator — shopping first
+    [0.10, 0.08, 0.12, 0.45, 0.15, 0.10],   # Highway Commuter — fuel first
+    [0.12, 0.07, 0.15, 0.08, 0.45, 0.13],   # Pragmatic Saver — bills first
+    [0.18, 0.17, 0.20, 0.15, 0.16, 0.14],   # Balanced Strategist — even split
+    [0.28, 0.30, 0.15, 0.07, 0.10, 0.10],   # Weekend Explorer — dining + travel
+    [0.10, 0.05, 0.30, 0.12, 0.28, 0.15],   # Family Anchor — groceries + bills
+    [0.25, 0.12, 0.33, 0.02, 0.18, 0.10],   # Campus Hustler — food + online shopping
 ]
 
 nlp_classifier = None
@@ -262,18 +312,13 @@ def _train_inline():
     nlp_classifier.fit(X, y)
 
     np.random.seed(42)
-    persona_centers = np.array([
-        [0.45, 0.10, 0.20, 0.08, 0.10, 0.07],
-        [0.12, 0.50, 0.15, 0.07, 0.09, 0.07],
-        [0.15, 0.08, 0.50, 0.05, 0.12, 0.10],
-        [0.10, 0.08, 0.12, 0.45, 0.15, 0.10],
-        [0.12, 0.07, 0.15, 0.08, 0.45, 0.13],
-        [0.18, 0.17, 0.20, 0.15, 0.16, 0.14],
-    ])
+    persona_centers = np.array(PERSONA_CENTERS)
     cluster_data = np.vstack([
         np.random.dirichlet(c * 12, size=150) for c in persona_centers
     ])
-    kmeans_model = KMeans(n_clusters=6, random_state=42, n_init=20, max_iter=500)
+    # seed clusters with the persona centroids so cluster i == PERSONAS[i]
+    kmeans_model = KMeans(n_clusters=len(PERSONAS), init=persona_centers,
+                          n_init=1, max_iter=500, random_state=42)
     kmeans_model.fit(cluster_data)
     print("✓ Inline models ready.")
 
@@ -806,9 +851,13 @@ def get_profile(user_id: str):
     total_points = int(actual)
     redemption_info = calculate_redemption_value(total_points, user_meta.get("redemption_pref","Cashback"), summary)
 
+    top2 = [f"{cat} {int(amt / total_spend * 100)}%" for cat, amt in sorted_cats[:2] if amt > 0]
+    persona_reason = f"Driven by your top spend: {' + '.join(top2)}" if top2 else ""
+
     return {
         "info": {
             "name": user_id, "persona": ai_persona,
+            "persona_reason": persona_reason,
             "income": user_meta["income"],
             "redemption_pref": user_meta["redemption_pref"],
             "description": insight
@@ -861,11 +910,14 @@ def smart_swipe(user: str, merchant: str):
     all_cards = get_all_cards()
     owned_objs = [c for c in all_cards if c.get('card_name') in owned_names]
     if owned_objs:
-        best = max(owned_objs, key=lambda c: get_rate(c, pred_cat) * (1 if c.get("max_benefit_category", "").lower() == pred_cat else 0.8))
-        swipe_value = get_rate(best, pred_cat) * 10000
-        best_cap = get_cap(best, pred_cat)
-        if best_cap > 0:
-            swipe_value = min(swipe_value, best_cap)
+        # Same selection logic as the ROI routing: capped value on a ₹10k
+        # month, ties broken by higher cap then lower fee — so Smart-Swipe
+        # and the ROI audit always name the same card.
+        def swipe_key(c):
+            val = min(get_rate(c, pred_cat) * 10000, get_cap(c, pred_cat) or float("inf"))
+            return (val, get_cap(c, pred_cat) or float("inf"), -float(c.get("annual_fee", 0) or 0))
+        best = max(owned_objs, key=swipe_key)
+        swipe_value = min(get_rate(best, pred_cat) * 10000, get_cap(best, pred_cat) or float("inf"))
         return {
             "best_card": best.get("card_name"), "bank": best.get("bank_name"),
             "savings_on_10k": int(swipe_value),
@@ -907,6 +959,23 @@ def refresh_cards():
             return {"status": "error", "message": "Scraper failed. Static data in use.", "error": result.stderr[-300:]}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+class CategoryCorrection(BaseModel):
+    user_id: str
+    merchant: str
+    category: str
+
+@app.post("/set-category")
+def set_category(data: CategoryCorrection):
+    """User corrected a transaction's category. Save it permanently — this
+    merchant (and any narration containing it) classifies correctly forever."""
+    cat = data.category.lower().strip()
+    if cat not in CATEGORIES:
+        return {"error": f"Invalid category. Use one of {CATEGORIES}"}
+    save_user_override(data.merchant, cat)
+    _INSIGHT_CACHE.pop(data.user_id, None)
+    return {"status": "success", "learned": f"'{data.merchant}' → {cat}",
+            "total_corrections": len(get_user_overrides())}
 
 @app.post("/upload-statement")
 async def upload_statement(user_id: str = Form(...), file: UploadFile = File(...), replace: bool = Form(True)):
@@ -987,18 +1056,24 @@ def rewards_analysis(user_id: str):
     if not wallet:
         return {"cards": []}
 
-    # Route each category to the wallet card that earns the most on it
+    # Route each category to the wallet card that earns the most on it.
+    # Ties (same rate, e.g. two 5% cards) break by higher cap, then lower fee —
+    # the card with more headroom is genuinely the better home for the spend.
     routing = {}   # category -> (card_name, annual value)
     for cat in CATEGORIES:
         if summary.get(cat, 0) <= 0:
             continue
-        best_name, best_val = None, 0.0
+        best = None   # (value, cap or inf, -fee, name)
         for name, card in wallet.items():
             v = capped_category_value(card, cat, summary[cat])
-            if v > best_val:
-                best_name, best_val = name, v
-        if best_name:
-            routing[cat] = (best_name, best_val)
+            if v <= 0:
+                continue
+            cap = get_cap(card, cat) or float("inf")
+            key = (v, cap, -float(card.get("annual_fee", 0) or 0))
+            if best is None or key > best[0]:
+                best = (key, name, v)
+        if best:
+            routing[cat] = (best[1], best[2])
 
     cards_out = []
     for name, card in wallet.items():
@@ -1033,6 +1108,7 @@ def rewards_analysis(user_id: str):
             "roi": int(roi),
             "reward_type": card.get("reward_type", "points"),
             "point_value_rs": card.get("point_value_rs", 1.0),
+            "projected_points": int(optimal_value / float(card.get("point_value_rs", 1.0) or 1.0)),
             "verdict": verdict,
         })
     cards_out.sort(key=lambda c: c["roi"], reverse=True)
@@ -1078,23 +1154,37 @@ def get_model_info():
 
 @app.post("/api/advisor/chat")
 def advisor_chat(req: ChatRequest):
+    """Advisor chat grounded in the user's REAL numbers: spend mix, wallet,
+    and the smart-routing plan — so answers are personal, not generic."""
     meta = get_users_meta().get(req.user_id, {})
-    persona = meta.get("persona", "User")
-    pref = meta.get("redemption_pref", "Cashback")
-    points = 0
+    owned = meta.get("owned_cards", [])
+    spend_line, routing_line = "", ""
     if os.path.exists(p('transactions.csv')):
         df = pd.read_csv(p('transactions.csv'))
-        user_df = df[df['user'].str.lower() == req.user_id.lower()]
+        user_df = df[df['user'].str.lower() == req.user_id.lower()].copy()
         if not user_df.empty:
-            points = int(user_df['points_earned'].sum())
+            user_df['category'] = user_df['merchant'].apply(lambda m: smart_predict(m)[0])
+            sums = user_df.groupby('category')['amount'].sum().sort_values(ascending=False)
+            total = float(sums.sum()) or 1
+            spend_line = ", ".join(f"{c} {int(v / total * 100)}% (₹{int(v):,})" for c, v in sums.head(4).items())
+            try:
+                ra = rewards_analysis(req.user_id)
+                routing_line = "; ".join(f"{cat}→{card}" for cat, card in ra.get("routing", {}).items())
+            except Exception:
+                pass
 
     context = (
-        f"You are NeuroCard AI, a friendly smart finance assistant. "
-        f"User is a '{persona}' spender with {points} reward points preferring '{pref}'. "
-        f"Keep answers short, practical, casual — like a knowledgeable friend. Max 3 sentences."
+        f"You are NeuroCard AI, the user's personal credit card advisor inside the NeuroCard app. "
+        f"Ground every answer in their actual data:\n"
+        f"- Wallet: {', '.join(owned) if owned else 'no cards yet'}\n"
+        f"- Spending mix: {spend_line or 'not analyzed yet'}\n"
+        f"- Best-card routing plan (which of their cards to use where): {routing_line or 'n/a'}\n"
+        f"Rules: be specific to THEIR numbers, suggest concrete actions (which card for what, "
+        f"fee waivers to chase, caps to watch). Short, casual, practical — like a sharp friend. "
+        f"Max 4 sentences. Never invent card benefits you're not sure of."
     )
     if not gemini_client:
-        return {"reply": f"Your {points} points are worth ~₹{int(points * 0.25)} in cashback. For {pref}, best to redeem during sale seasons for up to 2x value. (Add GEMINI_API_KEY to .env for real AI.)"}
+        return {"reply": "Add GEMINI_API_KEY to .env to enable the AI advisor. Meanwhile: check the Card ROI tab — it already shows which card to use for each spending category."}
 
     # Use the shared generate() helper (correct models + caching)
     result = generate(f"{context}\n\nUser: {req.message}")
