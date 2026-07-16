@@ -1023,6 +1023,11 @@ const App = () => {
                                   {c.roi >= 0 ? '+' : '−'}₹{Math.abs(c.roi).toLocaleString()}
                                 </p>
                                 <p className="text-[8px] uppercase font-bold text-slate-400">per year, net of fee</p>
+                                {c.welcome_value > 0 && (
+                                  <p className={`text-[9px] font-black ${c.first_year_roi >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>
+                                    1st year: {c.first_year_roi >= 0 ? '+' : '−'}₹{Math.abs(c.first_year_roi).toLocaleString()}
+                                  </p>
+                                )}
                               </div>
                             </div>
                             <div className="grid grid-cols-2 gap-2 mb-3">

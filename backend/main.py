@@ -918,6 +918,31 @@ def manual_analyze(data: SliderData):
     meta = get_users_meta().get(data.user_id, {})
     return {"recommendations": calculate_recs(data.dict(), user_income=meta.get("income", 9999999))}
 
+# ── BRAND AFFINITY ───────────────────────────────────────────────────────────
+# Our 6-category model treats all "shopping" alike, but co-branded cards earn
+# their headline rate ONLY at their partner brand (Amazon Pay ICICI's 5% is
+# Amazon-only; Flipkart Axis's 5% is Flipkart-only). When the merchant IS the
+# partner brand and the user owns that card, it must win the swipe.
+BRAND_AFFINITY = {
+    "amazon": ["Amazon Pay ICICI"],
+    "flipkart": ["Flipkart Axis"],
+    "myntra": ["Kotak Myntra", "Flipkart Axis"],
+    "cleartrip": ["Flipkart Axis"],
+    "swiggy": ["Swiggy HDFC Ornge", "HDFC Millennia"],
+    "zomato": ["HDFC Millennia", "Axis Ace"],
+    "uber": ["Flipkart Axis", "HDFC Millennia"],
+    "bookmyshow": ["HDFC Millennia"],
+    "nykaa": ["HDFC Regalia Gold"],
+    "tata": ["Tata Neu Infinity HDFC"],
+    "bigbasket": ["Tata Neu Infinity HDFC"],
+    "croma": ["Tata Neu Infinity HDFC"],
+    "westside": ["Tata Neu Infinity HDFC"],
+    "airtel": ["Airtel Axis"],
+    "bpcl": ["SBI BPCL Octane"],
+    "hpcl": ["ICICI HPCL Super Saver"],
+    "irctc": ["SBI IRCTC Premier", "HDFC IRCTC"],
+}
+
 @app.get("/smart-swipe")
 def smart_swipe(user: str, merchant: str):
     if not merchant.strip():
@@ -947,6 +972,22 @@ def smart_swipe(user: str, merchant: str):
     all_cards = get_all_cards()
     owned_objs = [c for c in all_cards if c.get('card_name') in owned_names]
     if owned_objs:
+        # Co-branded card owned + merchant is its partner brand → it wins
+        m_low = merchant.lower()
+        for kw, names in BRAND_AFFINITY.items():
+            if kw in m_low:
+                for n in names:
+                    aff = next((c for c in owned_objs if c.get("card_name") == n), None)
+                    if aff and get_rate(aff, pred_cat) > 0:
+                        val = min(get_rate(aff, pred_cat) * 10000, get_cap(aff, pred_cat) or float("inf"))
+                        return {
+                            "best_card": aff.get("card_name"), "bank": aff.get("bank_name"),
+                            "savings_on_10k": int(val),
+                            "category": pred_cat, "confidence": round(confidence, 2),
+                            "source": source,
+                            "reason": f"Co-branded card — its accelerated rate applies AT {kw.title()} specifically",
+                        }
+                break
         # Same selection logic as the ROI routing: capped value on a ₹10k
         # month, ties broken by higher cap then lower fee — so Smart-Swipe
         # and the ROI audit always name the same card.
@@ -1187,6 +1228,7 @@ def rewards_analysis(user_id: str):
             "fee_waiver_spend": int(waiver),
             "waiver_progress_pct": min(100, round(routed_spend / waiver * 100)) if waiver > 0 else 100,
             "roi": int(roi),
+            "first_year_roi": int(roi + welcome_value),
             "perks_value": int(perks_value),
             "perks_note": perks_note,
             "welcome_value": welcome_value,

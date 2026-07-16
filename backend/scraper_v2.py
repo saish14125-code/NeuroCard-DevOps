@@ -299,6 +299,7 @@ def gemini_merge(client, name, bank, parsed, cats, text_1f, text_pb, schema_exam
         name=name, bank=bank,
         text_1f=text_1f[:12000], text_pb=(text_pb or "")[:12000],
     )
+    exhausted = 0
     for model in MODELS:
         for attempt in range(3):
             try:
@@ -310,7 +311,9 @@ def gemini_merge(client, name, bank, parsed, cats, text_1f, text_pb, schema_exam
             except Exception as e:
                 msg = str(e)
                 if "RESOURCE_EXHAUSTED" in msg and "PerDay" in msg:
-                    raise DailyQuotaExhausted(model)  # no point retrying today
+                    print(f"    {model}: daily quota gone — trying next model")
+                    exhausted += 1
+                    break                            # next model, not next attempt
                 if "RESOURCE_EXHAUSTED" in msg:      # per-minute limit — wait it out
                     wait = 30
                     m = re.search(r"retry in ([\d.]+)s", msg, re.I)
@@ -321,6 +324,8 @@ def gemini_merge(client, name, bank, parsed, cats, text_1f, text_pb, schema_exam
                     continue
                 print(f"    {model}: {msg[:160]}")
                 break
+    if exhausted == len(MODELS):
+        raise DailyQuotaExhausted("all models")      # truly out for today
     return None
 
 
