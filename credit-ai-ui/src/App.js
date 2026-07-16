@@ -130,8 +130,8 @@ const CardModal = ({ card, onClose }) => {
               <p className="text-2xl font-black text-white">₹{(card.annual_savings||0).toLocaleString()}</p>
             </div>
             <div className="text-right">
-              <p className="text-white/60 text-[9px] uppercase font-bold">AI Match</p>
-              <p className="text-2xl font-black text-white">{card.match}%</p>
+              <p className="text-white/60 text-[9px] uppercase font-bold">Value-Back</p>
+              <p className="text-2xl font-black text-white">{card.value_back_pct ?? (card.match/20).toFixed(1)}%</p>
             </div>
             <div className="text-right">
               <p className="text-white/60 text-[9px] uppercase font-bold">Tier</p>
@@ -334,7 +334,7 @@ const CompareModal = ({ cards, onClose }) => {
                 { label:"Annual Fee",        vals: cards.map(c => Number(c.annual_fee||0)),         higher:false, fmt:v => v===0?"Free":`₹${v.toLocaleString()}` },
                 { label:"Fee Waiver",         vals: cards.map(c => Number(c.fee_waiver_spend||0)),   higher:false, fmt:v => v>0?`₹${v.toLocaleString()}`:"N/A" },
                 { label:"Min. Income",        vals: cards.map(c => Number(c.min_income||0)),         higher:false, fmt:v => v>0?`₹${v.toLocaleString()}`:"Any" },
-                { label:"AI Match Score",     vals: cards.map(c => c.match||0),                     higher:true,  fmt:v => `${v}%` },
+                { label:"Value-Back on Your Spend", vals: cards.map(c => c.value_back_pct||0),      higher:true,  fmt:v => `${v}%` },
                 { label:"Est. Annual Savings",vals: cards.map(c => c.annual_savings||0),            higher:true,  fmt:v => `₹${v.toLocaleString()}` },
               ].map(({ label, vals, higher, fmt }) => {
                 const bestIdx = getBestIdx(vals, higher);
@@ -547,14 +547,15 @@ const App = () => {
     finally { setUploadBusy(false); e.target.value=''; }
   };
 
-  const handleCategoryCorrection = async (merchant, category, previousCategory) => {
-    const ok = window.confirm(
-      `Reclassify "${merchant}"?\n\n` +
-      `${previousCategory.toUpperCase()}  →  ${category.toUpperCase()}\n\n` +
-      `This is permanent: every past and future transaction containing ` +
-      `"${merchant}" will be treated as ${category.toUpperCase()}. Are you sure?`
-    );
-    if (!ok) { fetchProfile(currentUser); return; }   // revert the dropdown
+  const [pendingFix, setPendingFix] = useState(null);   // {merchant, category, prev}
+
+  const handleCategoryCorrection = (merchant, category, previousCategory) => {
+    setPendingFix({ merchant, category, prev: previousCategory });
+  };
+
+  const confirmCategoryFix = async () => {
+    const { merchant, category } = pendingFix;
+    setPendingFix(null);
     try {
       await axios.post(`${API}/set-category`, { user_id: currentUser, merchant, category });
       fetchProfile(currentUser);   // reclassify everything with the new rule
@@ -675,7 +676,7 @@ const App = () => {
                 </div>
                 <div className="text-right">
                   <span className="text-[10px] font-black uppercase text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">
-                    {isManual?'Simulated':'AI Match'}: {card.match}%
+                    Value-back: {card.value_back_pct ?? (card.match/20).toFixed(1)}%
                   </span>
                   {parseInt(card.lounge_access)===1 && (
                     <p className="text-[9px] text-sky-500 font-bold mt-1">
@@ -697,6 +698,38 @@ const App = () => {
 
   return (
     <div className="min-h-screen bg-[#f0f4f9] text-slate-900 font-sans p-4 md:p-8">
+      {pendingFix && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={()=>setPendingFix(null)}>
+          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl p-8" onClick={e=>e.stopPropagation()}>
+            <div className="w-12 h-12 bg-violet-100 rounded-2xl flex items-center justify-center mb-4">
+              <Sparkles size={22} className="text-violet-500"/>
+            </div>
+            <h3 className="text-xl font-black text-slate-800 mb-2">Teach NeuroCard?</h3>
+            <p className="text-sm text-slate-500 font-medium mb-4">
+              You're reclassifying <span className="font-black text-slate-800">"{pendingFix.merchant}"</span>
+            </p>
+            <div className="flex items-center justify-center gap-3 bg-slate-50 rounded-2xl p-4 mb-4">
+              <span className={`text-xs uppercase font-black px-3 py-1.5 rounded-xl ${(CAT_COLORS[pendingFix.prev]||CAT_COLORS.others).bg} ${(CAT_COLORS[pendingFix.prev]||CAT_COLORS.others).text}`}>{pendingFix.prev}</span>
+              <span className="text-slate-300 font-black">→</span>
+              <span className={`text-xs uppercase font-black px-3 py-1.5 rounded-xl ring-2 ring-violet-400 ${(CAT_COLORS[pendingFix.category]||CAT_COLORS.others).bg} ${(CAT_COLORS[pendingFix.category]||CAT_COLORS.others).text}`}>{pendingFix.category}</span>
+            </div>
+            <p className="text-xs text-slate-400 font-medium mb-6">
+              This is permanent: every past and future transaction containing this name
+              will be treated as <span className="font-bold">{pendingFix.category}</span>, and the AI will remember it.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={()=>setPendingFix(null)}
+                className="flex-1 py-3 rounded-2xl font-black text-sm bg-slate-100 text-slate-500 hover:bg-slate-200 transition-all">
+                Cancel
+              </button>
+              <button onClick={confirmCategoryFix}
+                className="flex-1 py-3 rounded-2xl font-black text-sm bg-violet-600 text-white hover:bg-violet-700 transition-all">
+                Yes, remember this
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {selectedCard && <CardModal card={selectedCard} onClose={() => setSelectedCard(null)} />}
       {showCompare && compareCards.length >= 2 && <CompareModal cards={compareCards} onClose={() => setShowCompare(false)} />}
 
@@ -1017,6 +1050,11 @@ const App = () => {
                               </div>
                             )}
                             <p className="text-[10px] font-bold text-slate-600">{c.verdict}</p>
+                            {c.welcome_value > 0 && (
+                              <p className="text-[9px] font-bold text-violet-500 mt-1">
+                                🎁 + ₹{c.welcome_value.toLocaleString()} one-time welcome benefit (first year only)
+                              </p>
+                            )}
                           </div>
                         ))}
                       </div>

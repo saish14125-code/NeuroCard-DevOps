@@ -35,6 +35,7 @@ CARD_CSV_COLS = [
     "lounge_domestic_yr", "lounge_intl_yr",
     "welcome_benefit", "milestone_benefit", "exclusions", "highlights",
     "source_url", "data_updated", "caps_verified",
+    "welcome_value_rs", "milestone_value_rs", "milestone_spend_rs",
 ]
 
 _UPDATED = "2026-07-15"
@@ -56,6 +57,7 @@ REAL_CARDS = [
         "exclusions": "fuel rewards, rent, EMI transactions",
         "highlights": "5% back on Amazon for Prime members (3% for non-Prime)|Completely UNCAPPED cashback — no monthly limits|Lifetime free, no fee ever|Cashback credited as Amazon Pay balance",
         "source_url": "https://1finance.co.in/product-scoring/credit-card/icici-amazon-pay-card",
+        "welcome_value_rs": 2500, "milestone_value_rs": 0, "milestone_spend_rs": 0,
         "data_updated": _UPDATED, "caps_verified": 1,
     },
     {
@@ -74,6 +76,7 @@ REAL_CARDS = [
         "exclusions": "fuel, rent, wallet loads, jewellery, school fees",
         "highlights": "5% cashback on ALL online spends — any website or app|₹5,000/month cashback cap (shared across the 5% categories)|1% on offline swipes|Cashback auto-credited to statement",
         "source_url": "https://1finance.co.in/product-scoring/credit-card/sbi-cashback-card",
+        "welcome_value_rs": 0, "milestone_value_rs": 0, "milestone_spend_rs": 0,
         "data_updated": _UPDATED, "caps_verified": 1,
     },
     {
@@ -92,6 +95,7 @@ REAL_CARDS = [
         "exclusions": "fuel, rent, wallet loads, EMI, insurance, education, jewellery",
         "highlights": "5% on electricity, gas & recharges via Google Pay|4% on Zomato, Swiggy and Ola|Combined ₹500/month cap on the 4–5% categories|Flat 1.5% UNCAPPED on everything else",
         "source_url": "https://www.paisabazaar.com/axis-bank/ace-credit-card/",
+        "welcome_value_rs": 0, "milestone_value_rs": 0, "milestone_spend_rs": 0,
         "data_updated": _UPDATED, "caps_verified": 1,
     },
     {
@@ -110,6 +114,7 @@ REAL_CARDS = [
         "exclusions": "fuel, rent, wallet loads, EMI",
         "highlights": "5% on Swiggy food orders, Instamart & Dineout (₹1,500/mo cap)|5% on select online spends too|Swiggy One free for a year — worth more than the fee|1% elsewhere (₹1,000/mo cap)",
         "source_url": "https://www.paisabazaar.com/hdfc-bank/swiggy-ornge-hdfc-credit-card/",
+        "welcome_value_rs": 1200, "milestone_value_rs": 0, "milestone_spend_rs": 0,
         "data_updated": _UPDATED, "caps_verified": 1,
     },
     {
@@ -128,6 +133,7 @@ REAL_CARDS = [
         "exclusions": "fuel, rent, wallet loads, EMI, gift cards",
         "highlights": "7.5% on Myntra (₹4,000/quarter cap)|5% on Flipkart & Cleartrip (₹4,000/quarter each)|UNLIMITED 4% on Swiggy, Uber, PVR & cult.fit|1% base cashback everywhere else",
         "source_url": "https://www.paisabazaar.com/axis-bank/flipkart-axis-bank-credit-card/",
+        "welcome_value_rs": 250, "milestone_value_rs": 0, "milestone_spend_rs": 0,
         "data_updated": _UPDATED, "caps_verified": 1,
     },
     {
@@ -146,6 +152,7 @@ REAL_CARDS = [
         "exclusions": "rent, wallet loads, EMI, government spends",
         "highlights": "5% on Amazon, Flipkart, Myntra, Swiggy, Zomato, Uber, BookMyShow + more|1,000 CashPoints/month cap on the 5% bucket|1 CashPoint = ₹1 against your statement|1% on everything else",
         "source_url": "https://www.paisabazaar.com/hdfc-bank/millennia-credit-card/",
+        "welcome_value_rs": 1000, "milestone_value_rs": 4000, "milestone_spend_rs": 400000,
         "data_updated": _UPDATED, "caps_verified": 1,
     },
     {
@@ -164,6 +171,7 @@ REAL_CARDS = [
         "exclusions": "fuel points",
         "highlights": "5 points per ₹200 on ALL spends — even utilities, insurance & education|5X points on Nykaa, Myntra, M&S, Reliance Digital (5,000 pts/mo cap)|12 domestic + 6 international lounge visits|Redeem via exclusive Gold Catalogue (Apple, Bose...)",
         "source_url": "https://www.paisabazaar.com/hdfc-bank/hdfc-regalia-gold-credit-card/",
+        "welcome_value_rs": 3000, "milestone_value_rs": 6000, "milestone_spend_rs": 600000,
         "data_updated": _UPDATED, "caps_verified": 1,
     },
     {
@@ -182,6 +190,7 @@ REAL_CARDS = [
         "exclusions": "fuel points, rent, wallet loads",
         "highlights": "Flat 3.33% back on virtually everything|Up to 10X (33% back) on SmartBuy — capped 15,000 pts/mo|1 point = ₹1 on flights, hotels & Apple products|UNLIMITED lounge access, India + abroad|Lowest interest rate in India: 1.99%/month",
         "source_url": "https://www.paisabazaar.com/hdfc-bank/infinia-credit-card/",
+        "welcome_value_rs": 12500, "milestone_value_rs": 0, "milestone_spend_rs": 0,
         "data_updated": _UPDATED, "caps_verified": 1,
     },
     {
@@ -200,6 +209,7 @@ REAL_CARDS = [
         "exclusions": "fuel, utilities, rent, wallet loads, insurance, gold",
         "highlights": "5 EDGE Miles per ₹100 on flights & hotels (first ₹2L/month)|2 Miles per ₹100 on everything else|1 Mile = ₹1 on Travel EDGE, up to ₹2 via airline partners|Tier system: spend more, earn faster",
         "source_url": "https://www.paisabazaar.com/axis-bank/atlas-credit-card/",
+        "welcome_value_rs": 2500, "milestone_value_rs": 2500, "milestone_spend_rs": 300000,
         "data_updated": _UPDATED, "caps_verified": 1,
     },
     {
@@ -218,6 +228,7 @@ REAL_CARDS = [
         "exclusions": "fuel NeuCoins, rent, EMI",
         "highlights": "5% NeuCoins on Tata brands — BigBasket, Croma, Westside, Air India|Extra 5% with NeuPass on select Tata Neu spends|RuPay: earn 1.5% even on UPI payments (500 NeuCoins/mo cap)|8 domestic + 4 international lounge visits",
         "source_url": "https://www.paisabazaar.com/hdfc-bank/tata-neu-infinity-hdfc-bank-credit-card/",
+        "welcome_value_rs": 1499, "milestone_value_rs": 0, "milestone_spend_rs": 0,
         "data_updated": _UPDATED, "caps_verified": 1,
     },
 ]

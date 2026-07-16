@@ -47,8 +47,9 @@ else:
     print("⚠ GEMINI_API_KEY not set — LLM features in simulated mode.")
 
 MODELS = [
-    "gemini-2.5-flash",    # primary (2.0-flash has no free quota anymore)
-    "gemini-2.5-flash-lite",  # fallback
+    "gemini-3.1-flash-lite",   # highest free-tier daily quota
+    "gemini-3-flash-preview",  # fallback
+    "gemini-2.5-flash",        # last resort (20/day on this key)
 ]
 # In-memory caches (live for the server process lifetime)
 GEMINI_CACHE = {}      # prompt string → response text
@@ -265,6 +266,18 @@ def bootstrap_card_data():
 
     if os.path.exists(path) and _csv_is_v2(path):
         df = pd.read_csv(path)
+        if 'welcome_value_rs' not in df.columns:
+            # migrate: add benefit-value columns, filling curated cards from source
+            for col in ('welcome_value_rs', 'milestone_value_rs', 'milestone_spend_rs'):
+                df[col] = 0
+            curated = {c['card_name']: c for c in REAL_CARDS}
+            for i, row in df.iterrows():
+                src = curated.get(row['card_name'])
+                if src:
+                    for col in ('welcome_value_rs', 'milestone_value_rs', 'milestone_spend_rs'):
+                        df.at[i, col] = src.get(col, 0)
+            df.to_csv(path, index=False)
+            print("✓ Migrated catalog: welcome/milestone benefit values added.")
         if 'caps_verified' not in df.columns:
             # migrate: hand-curated / Gemini rows are verified, auto-parsed are not
             df['caps_verified'] = (~df['highlights'].astype(str)
@@ -646,6 +659,7 @@ def calculate_recs(summary, user_income=None, specific_cards=None):
             "card_category": card.get("card_category", "General"),
             "eligibility_level": card.get("eligibility_level", "Low"),
             "match": min(99.9, round(match_score, 1)),
+            "value_back_pct": round((savings / total_spend) * 100, 2),
             "annual_savings": int(savings),
             "income_eligible": income_eligible,       # NEW: True if user qualifies
             "rates": {k: card.get(f"reward_points_{k}" if k != "utility" else "reward_points_utilities", 0) for k in cat_keys},
@@ -1130,13 +1144,23 @@ def rewards_analysis(user_id: str):
         fee = float(card.get("annual_fee", 0) or 0)
         waiver = float(card.get("fee_waiver_spend", 0) or 0)
 
-        perks_value, perks_note = 0, ""
+        perks_value, perk_bits = 0, []
         if user_travels:
             dom = min(int(card.get("lounge_domestic_yr", 0) or 0), 8)    # realistic usage caps
             intl = min(int(card.get("lounge_intl_yr", 0) or 0), 4)
-            perks_value = dom * 500 + intl * 1000
-            if perks_value:
-                perks_note = f"{dom} domestic + {intl} intl lounge visits ≈ ₹{perks_value:,}"
+            lounge_val = dom * 500 + intl * 1000
+            if lounge_val:
+                perks_value += lounge_val
+                perk_bits.append(f"{dom} dom + {intl} intl lounge ≈ ₹{lounge_val:,}")
+        # milestone benefits count only when the routed spend actually crosses
+        # the bank's threshold — no fantasy vouchers
+        m_val = float(card.get("milestone_value_rs", 0) or 0)
+        m_spend = float(card.get("milestone_spend_rs", 0) or 0)
+        if m_val > 0 and routed_spend >= m_spend > 0:
+            perks_value += m_val
+            perk_bits.append(f"milestone benefits ≈ ₹{int(m_val):,}")
+        perks_note = "; ".join(perk_bits)
+        welcome_value = int(float(card.get("welcome_value_rs", 0) or 0))  # one-time, shown separately
 
         roi = optimal_value + perks_value - fee
 
@@ -1165,6 +1189,7 @@ def rewards_analysis(user_id: str):
             "roi": int(roi),
             "perks_value": int(perks_value),
             "perks_note": perks_note,
+            "welcome_value": welcome_value,
             "reward_type": card.get("reward_type", "points"),
             "point_value_rs": card.get("point_value_rs", 1.0),
             "projected_points": int(optimal_value / float(card.get("point_value_rs", 1.0) or 1.0)),

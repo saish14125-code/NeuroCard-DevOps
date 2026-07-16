@@ -38,7 +38,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 CSV_PATH = os.path.join(BASE_DIR, "NeuroCard_Data.csv")
-MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+MODELS = ["gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-2.5-flash"]
 
 
 # ── VALIDATION SCHEMA ────────────────────────────────────────────────────────
@@ -81,6 +81,9 @@ class CardRow(BaseModel):
     source_url: str = ""
     data_updated: str = ""
     caps_verified: int = Field(ge=0, le=1, default=1)
+    welcome_value_rs: int = Field(ge=0, le=60000, default=0)
+    milestone_value_rs: int = Field(ge=0, le=60000, default=0)
+    milestone_spend_rs: int = Field(ge=0, le=5000000, default=0)
 
     @field_validator("reward_type")
     @classmethod
@@ -204,7 +207,7 @@ def upsert(row: dict):
     df = pd.read_csv(CSV_PATH) if os.path.exists(CSV_PATH) else pd.DataFrame(columns=CARD_CSV_COLS)
     for col in CARD_CSV_COLS:
         if col not in df.columns:
-            df[col] = 0 if col.startswith(("cap", "reward_", "lounge_", "joining", "fuel_", "forex")) else ""
+            df[col] = 0 if col.startswith(("cap", "reward_", "lounge_", "joining", "fuel_", "forex", "welcome_value", "milestone_")) else ""
     mask = df["card_name"].str.lower() == row["card_name"].lower()
     if mask.any():
         for k, v in row.items():

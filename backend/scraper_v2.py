@@ -227,6 +227,10 @@ RULES:
   the points-earning structure when stated (e.g. "4 RP per Rs.150 spent, 1 RP = Rs.0.50").
 - exclusions: comma-separated spend types that earn nothing.
 - welcome_benefit / milestone_benefit: one concise sentence each, "" if none.
+- welcome_value_rs: estimated one-time rupee value of the welcome benefit
+  (vouchers/points/memberships at face value). 0 if none or unquantifiable.
+- milestone_value_rs: estimated ANNUAL rupee value of milestone benefits, and
+  milestone_spend_rs: the annual spend needed to unlock them. 0 if none.
 - lounge_domestic_yr / lounge_intl_yr: visits per year; 99 means unlimited.
 - Card name must be exactly: {name}  | bank_name exactly: {bank}
 - Return ONLY the JSON object. No markdown fences, no commentary.
@@ -283,6 +287,7 @@ def build_deterministic(name, bank, parsed, cats, source_url):
         "exclusions": "", "highlights": highlights[:500],
         "source_url": source_url, "data_updated": pd.Timestamp.now().strftime("%Y-%m-%d"),
         "caps_verified": 0,
+        "welcome_value_rs": 0, "milestone_value_rs": 0, "milestone_spend_rs": 0,
     }
 
 
