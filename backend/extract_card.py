@@ -191,6 +191,11 @@ def extract(page_text: str, source_url: str = "", hint_name: str = "") -> dict |
         data["source_url"] = source_url
     data.setdefault("data_updated", pd.Timestamp.now().strftime("%Y-%m-%d"))
 
+    for flag in ("lounge_access", "fuel_surcharge_waiver"):
+        try:
+            data[flag] = 1 if float(data.get(flag, 0) or 0) > 0 else 0
+        except (TypeError, ValueError):
+            data[flag] = 0
     try:
         row = CardRow(**data)
     except Exception as e:

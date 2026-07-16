@@ -410,8 +410,7 @@ def main():
                 time.sleep(4)  # stay far under free-tier RPM
             except DailyQuotaExhausted:
                 if enrich:
-                    print("
-⚠ Gemini DAILY quota exhausted — enrichment stops here. "
+                    print("\n⚠ Gemini DAILY quota exhausted — enrichment stops here. "
                           "Run 'python scraper_v2.py --enrich' again tomorrow; progress is saved.")
                     break
                 print("    ⚠ Gemini DAILY quota exhausted — switching to deterministic-only mode")
@@ -427,7 +426,13 @@ def main():
         data["bank_name"] = bank
         data["source_url"] = url_1f
         data["data_updated"] = pd.Timestamp.now().strftime("%Y-%m-%d")
-        data.setdefault("caps_verified", 1)
+        data["caps_verified"] = 1        # gemini-verified (force: schema example says 0)
+        for flag in ("lounge_access", "fuel_surcharge_waiver"):
+            # LLMs put counts/amounts here; it's a 0/1 flag — coerce, don't reject
+            try:
+                data[flag] = 1 if float(data.get(flag, 0) or 0) > 0 else 0
+            except (TypeError, ValueError):
+                data[flag] = 0
 
         try:
             row = CardRow(**data).model_dump()
