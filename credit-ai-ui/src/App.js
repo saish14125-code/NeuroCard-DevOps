@@ -520,22 +520,41 @@ const App = () => {
   }, [activeTab, currentUser, data]);
 
   const handleStatementUpload = async (e) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
+    const files = [...(e.target.files || [])];
+    if (!files.length) return;
     setUploadBusy(true); setUploadResult(null);
+    let imported = 0, skipped = 0, firstError = null;
     try {
-      const fd = new FormData();
-      fd.append('user_id', currentUser);
-      fd.append('file', f);
-      fd.append('replace', 'true');
-      const r = await axios.post(`${API}/upload-statement`, fd);
-      if (r.data.error) setUploadResult({ error: r.data.error });
-      else { setUploadResult(r.data); fetchProfile(currentUser); }
+      for (const f of files) {
+        // Bank statements and CC statements can be mixed — a CC statement
+        // gets attributed to its card for real per-card analytics.
+        const cardName = window.prompt(
+          `"${f.name}"\n\nIf this is a CREDIT CARD statement, type the card's name exactly as it appears in the app (e.g. Swiggy HDFC Ornge).\n\nLeave EMPTY if it's a bank account statement.`, ''
+        );
+        const fd = new FormData();
+        fd.append('user_id', currentUser);
+        fd.append('file', f);
+        fd.append('replace', 'true');
+        fd.append('card_name', (cardName || '').trim());
+        const r = await axios.post(`${API}/upload-statement`, fd);
+        if (r.data.error) { firstError = `${f.name}: ${r.data.error}`; continue; }
+        imported += r.data.imported || 0;
+        skipped += (r.data.skipped_transfers || 0) + (r.data.skipped_p2p || 0);
+      }
+      if (imported > 0) { setUploadResult({ imported, skipped }); fetchProfile(currentUser); }
+      else setUploadResult({ error: firstError || 'Nothing imported' });
     } catch(err) { console.error(err); setUploadResult({ error: 'Upload failed — is the backend running?' }); }
     finally { setUploadBusy(false); e.target.value=''; }
   };
 
-  const handleCategoryCorrection = async (merchant, category) => {
+  const handleCategoryCorrection = async (merchant, category, previousCategory) => {
+    const ok = window.confirm(
+      `Reclassify "${merchant}"?\n\n` +
+      `${previousCategory.toUpperCase()}  →  ${category.toUpperCase()}\n\n` +
+      `This is permanent: every past and future transaction containing ` +
+      `"${merchant}" will be treated as ${category.toUpperCase()}. Are you sure?`
+    );
+    if (!ok) { fetchProfile(currentUser); return; }   // revert the dropdown
     try {
       await axios.post(`${API}/set-category`, { user_id: currentUser, merchant, category });
       fetchProfile(currentUser);   // reclassify everything with the new rule
@@ -897,12 +916,12 @@ const App = () => {
                   <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
                     <h3 className="text-slate-800 font-bold flex items-center gap-2 text-xl"><Clock className="text-slate-400"/> Recent Transactions</h3>
                     <div className="flex items-center gap-3">
-                      {uploadResult?.imported && <span className="text-xs font-bold text-emerald-600">✓ {uploadResult.imported} real transactions imported</span>}
+                      {uploadResult?.imported && <span className="text-xs font-bold text-emerald-600">✓ {uploadResult.imported} transactions imported ({uploadResult.skipped} transfers/P2P filtered)</span>}
                       {uploadResult?.error && <span className="text-xs font-bold text-red-500">{uploadResult.error}</span>}
-                      <input ref={fileInputRef} type="file" accept=".csv,.xls,.xlsx" className="hidden" onChange={handleStatementUpload}/>
+                      <input ref={fileInputRef} type="file" accept=".csv,.xls,.xlsx" multiple className="hidden" onChange={handleStatementUpload}/>
                       <button onClick={()=>fileInputRef.current?.click()} disabled={uploadBusy}
                         className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-black px-4 py-2.5 rounded-xl transition-all">
-                        {uploadBusy ? 'Analyzing your statement…' : '📄 Upload Real Statement'}
+                        {uploadBusy ? 'Analyzing your statements…' : '📄 Upload Statement(s)'}
                       </button>
                     </div>
                   </div>
@@ -917,7 +936,7 @@ const App = () => {
                               <p className="text-sm font-bold text-slate-800">{t.merchant}</p>
                               <p className="text-[9px] text-slate-400 font-black uppercase">{t.date}</p>
                               <select value={t.category} title="Wrong category? Fix it — the app remembers forever"
-                                onChange={e=>handleCategoryCorrection(t.merchant, e.target.value)}
+                                onChange={e=>handleCategoryCorrection(t.merchant, e.target.value, t.category)}
                                 className={`text-[8px] uppercase font-bold ${col.text} ${col.badge} px-1 py-0.5 rounded-md mt-0.5 inline-block border-0 outline-none cursor-pointer appearance-auto`}>
                                 {['dining','travel','shopping','fuel','utility','others'].map(c=><option key={c} value={c}>{c}</option>)}
                               </select>
@@ -973,13 +992,14 @@ const App = () => {
                                 <p className="text-[8px] uppercase font-bold text-slate-400">per year, net of fee</p>
                               </div>
                             </div>
-                            <div className="grid grid-cols-3 gap-2 mb-3">
+                            <div className="grid grid-cols-2 gap-2 mb-3">
                               {[
-                                { label:'Would earn / yr', val:`₹${c.optimal_value.toLocaleString()}` },
+                                { label:'Rewards / yr', val:`₹${c.optimal_value.toLocaleString()}` },
+                                { label:'Perks value / yr', val: c.perks_value ? `₹${c.perks_value.toLocaleString()}` : '—', hint: c.perks_note },
                                 { label:'Annual Fee', val: c.annual_fee ? `₹${c.annual_fee.toLocaleString()}` : 'Free' },
                                 { label:'Spend routed here', val:`₹${c.routed_spend.toLocaleString()}` },
-                              ].map(({label,val}) => (
-                                <div key={label} className="bg-white rounded-xl p-2 text-center border border-slate-100">
+                              ].map(({label,val,hint}) => (
+                                <div key={label} title={hint||''} className="bg-white rounded-xl p-2 text-center border border-slate-100">
                                   <p className="text-[8px] uppercase font-bold text-slate-400">{label}</p>
                                   <p className="text-xs font-black text-slate-700">{val}</p>
                                 </div>
@@ -1018,7 +1038,7 @@ const App = () => {
                                 <span className="font-bold text-slate-700 truncate max-w-[60%]">{c.card_name}</span>
                                 <span className="font-black text-emerald-600">
                                   ₹{c.optimal_value.toLocaleString()}/yr
-                                  {c.reward_type !== 'cashback' && ` (~${c.projected_points.toLocaleString()} ${c.reward_type})`}
+                                  {c.reward_type !== 'cashback' && Number(c.point_value_rs) !== 1 && ` (~${c.projected_points.toLocaleString()} ${c.reward_type})`}
                                 </span>
                               </div>
                               <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">

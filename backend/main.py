@@ -11,6 +11,7 @@ from pydantic import BaseModel
 import pandas as pd
 import numpy as np
 import os
+import re
 import json
 import random
 import csv
@@ -53,26 +54,48 @@ MODELS = [
 GEMINI_CACHE = {}      # prompt string → response text
 _INSIGHT_CACHE = {}    # user_id → insight string (prevents re-calling on tab switch)
 
-def generate(prompt):
-    if not gemini_client:
-        return None
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
+def _groq_generate(prompt):
+    """Fallback LLM: Groq's free tier (Llama 3.3 70B) has far higher daily
+    limits than Gemini's. Used automatically when Gemini fails/quota-outs."""
+    if not GROQ_API_KEY:
+        return None
+    try:
+        import requests as _rq
+        r = _rq.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+            json={"model": "llama-3.3-70b-versatile",
+                  "messages": [{"role": "user", "content": prompt}],
+                  "max_tokens": 600},
+            timeout=30,
+        )
+        if r.status_code == 200:
+            return r.json()["choices"][0]["message"]["content"].strip()
+        print("groq:", r.status_code, r.text[:150])
+    except Exception as e:
+        print("groq failed:", e)
+    return None
+
+def generate(prompt):
     if prompt in GEMINI_CACHE:
         return GEMINI_CACHE[prompt]
 
-    for model in MODELS:
-        try:
-            r = gemini_client.models.generate_content(
-                model=model,
-                contents=prompt
-            )
-            text = r.text.strip()
-            GEMINI_CACHE[prompt] = text
-            return text
-        except Exception as e:
-            print(f"{model} failed:", e)
+    if gemini_client:
+        for model in MODELS:
+            try:
+                r = gemini_client.models.generate_content(model=model, contents=prompt)
+                text = r.text.strip()
+                GEMINI_CACHE[prompt] = text
+                return text
+            except Exception as e:
+                print(f"{model} failed:", e)
 
-    return None
+    text = _groq_generate(prompt)
+    if text:
+        GEMINI_CACHE[prompt] = text
+    return text
 
 app = FastAPI(title="NeuroCard API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -767,7 +790,7 @@ def create_user_api(user: NewUser):
     with open(file_path, mode='a', newline='') as file:
         writer = csv.writer(file)
         if not file_exists:
-            writer.writerow(["user","date","merchant","amount","paid_using","points_earned"])
+            writer.writerow(["user","date","merchant","amount","paid_using","points_earned","source"])
 
         # ALL writing logic is now indented INSIDE the 'with' block
         for cat, target_amount in targets.items():
@@ -781,7 +804,7 @@ def create_user_api(user: NewUser):
                 card_used = random.choice(user.owned_cards) if user.owned_cards else "Debit/Cash"
                 pred_cat, _ = smart_predict(merchant)
                 rate = get_rate_from_df(df, card_used, pred_cat) if card_used != "Debit/Cash" else 0
-                writer.writerow([user.name, date.strftime("%Y-%m-%d %H:%M"), merchant, amount, card_used, int(amount * rate)])
+                writer.writerow([user.name, date.strftime("%Y-%m-%d %H:%M"), merchant, amount, card_used, int(amount * rate), "synthetic"])
 
     return {"status": "success"}
 
@@ -978,10 +1001,13 @@ def set_category(data: CategoryCorrection):
             "total_corrections": len(get_user_overrides())}
 
 @app.post("/upload-statement")
-async def upload_statement(user_id: str = Form(...), file: UploadFile = File(...), replace: bool = Form(True)):
-    """Ingest a real bank statement (CSV/Excel): parse → classify → analyze.
-    By default this REPLACES the user's synthetic history so the dashboard
-    reflects their real spending, not the demo data."""
+async def upload_statement(user_id: str = Form(...), file: UploadFile = File(...),
+                           replace: bool = Form(True), card_name: str = Form("")):
+    """Ingest a real statement (CSV/Excel). Multiple statements coexist:
+    each upload is tagged with its source, and re-uploading the same file
+    replaces only that source's rows — so bank + credit card statements can
+    be combined. If `card_name` is given (a CC statement), its transactions
+    are attributed to that card for real per-card analytics."""
     from statement_parser import parse_statement
     blob = await file.read()
     try:
@@ -989,13 +1015,27 @@ async def upload_statement(user_id: str = Form(...), file: UploadFile = File(...
     except ValueError as e:
         return {"error": str(e)}
 
+    # Source tag: which upload these rows came from (filename-derived).
+    # paid_using stays the card's name for CC statements → real attribution.
+    source = "stmt:" + re.sub(r"[_\d.]{6,}.*$", "", os.path.splitext(file.filename)[0])[:30].strip(" _-").lower()
+    paid_using = card_name.strip() or "Statement Upload"
+
     file_path = p('transactions.csv')
+    cols = ["user", "date", "merchant", "amount", "paid_using", "points_earned", "source"]
     if os.path.exists(file_path):
         df = pd.read_csv(file_path)
+        if "source" not in df.columns:   # migrate old files
+            df["source"] = df["paid_using"].apply(
+                lambda x: "stmt:legacy" if str(x) == "Statement Upload" else "synthetic")
+        um = df['user'].str.lower() == user_id.lower()
+        # re-upload of the same file replaces only that source's rows
+        df = df[~(um & (df['source'] == source))]
+        um = df['user'].str.lower() == user_id.lower()
         if replace:
-            df = df[df['user'].str.lower() != user_id.lower()]
+            # first real statement retires this user's synthetic demo data
+            df = df[~(um & df['source'].isin(["synthetic", "stmt:legacy"]))]
     else:
-        df = pd.DataFrame(columns=["user", "date", "merchant", "amount", "paid_using", "points_earned"])
+        df = pd.DataFrame(columns=cols)
 
     rows, kept, skipped_transfers, skipped_p2p = [], [], 0, 0
     for t in txns:
@@ -1012,7 +1052,8 @@ async def upload_statement(user_id: str = Form(...), file: UploadFile = File(...
         kept.append(t)
         rows.append({
             "user": user_id, "date": t["date"], "merchant": t["merchant"],
-            "amount": t["amount"], "paid_using": "Statement Upload", "points_earned": 0,
+            "amount": t["amount"], "paid_using": paid_using, "points_earned": 0,
+            "source": source,
         })
     if not rows:
         return {"error": "Statement parsed, but every debit looked like a transfer/P2P payment — nothing card-routable to analyze."}
@@ -1027,6 +1068,7 @@ async def upload_statement(user_id: str = Form(...), file: UploadFile = File(...
                         "amount": t["amount"], "category": cat, "confidence": conf})
     _INSIGHT_CACHE.pop(user_id, None)  # force fresh AI insight for real data
     return {"status": "success", "imported": len(rows), "replaced_synthetic": replace,
+            "source": source, "attributed_to": paid_using,
             "skipped_transfers": skipped_transfers, "skipped_p2p": skipped_p2p,
             "preview": preview}
 
@@ -1075,6 +1117,11 @@ def rewards_analysis(user_id: str):
         if best:
             routing[cat] = (best[1], best[2])
 
+    # Perks are real money too: a lounge visit bought at the door costs
+    # ₹500–1,500. But lounges are only worth something to someone who
+    # actually travels — so perk value is gated on real travel spend.
+    user_travels = summary.get("travel", 0) >= 20000   # ≥ ~₹1.7k/month on travel
+
     cards_out = []
     for name, card in wallet.items():
         assigned = [cat for cat, (winner, _) in routing.items() if winner == name]
@@ -1082,20 +1129,30 @@ def rewards_analysis(user_id: str):
         optimal_value = sum(val for cat, (winner, val) in routing.items() if winner == name)
         fee = float(card.get("annual_fee", 0) or 0)
         waiver = float(card.get("fee_waiver_spend", 0) or 0)
-        roi = optimal_value - fee
 
+        perks_value, perks_note = 0, ""
+        if user_travels:
+            dom = min(int(card.get("lounge_domestic_yr", 0) or 0), 8)    # realistic usage caps
+            intl = min(int(card.get("lounge_intl_yr", 0) or 0), 4)
+            perks_value = dom * 500 + intl * 1000
+            if perks_value:
+                perks_note = f"{dom} domestic + {intl} intl lounge visits ≈ ₹{perks_value:,}"
+
+        roi = optimal_value + perks_value - fee
+
+        perk_suffix = f" (+ ₹{perks_value:,} in lounge value)" if perks_value else ""
         if fee == 0 and assigned:
             verdict = f"Free card and your best pick for {', '.join(assigned)} — keep, zero downside."
         elif fee == 0:
             verdict = "Free card — never your best option, but it costs nothing to hold."
-        elif not assigned:
-            verdict = f"Never your best card for ANY category — its ₹{int(fee):,} fee is pure loss. Consider replacing it."
+        elif not assigned and roi <= 0:
+            verdict = f"Never your best card for ANY category{perk_suffix} — its ₹{int(fee):,} fee is a loss. Consider replacing it."
         elif waiver > 0 and routed_spend >= waiver:
-            verdict = f"Routing {', '.join(assigned)} here crosses the ₹{int(waiver):,} waiver — fee-free and earning ₹{int(optimal_value):,}/yr."
+            verdict = f"Routing {', '.join(assigned)} here crosses the ₹{int(waiver):,} waiver — fee-free, earning ₹{int(optimal_value):,}/yr{perk_suffix}."
         elif roi > 0:
-            verdict = f"Earns ₹{int(optimal_value):,}/yr on {', '.join(assigned)} vs ₹{int(fee):,} fee — worth keeping."
+            verdict = f"Earns ₹{int(optimal_value):,}/yr on {', '.join(assigned) or 'perks alone'}{perk_suffix} vs ₹{int(fee):,} fee — worth keeping."
         else:
-            verdict = f"Even used optimally it earns ₹{int(optimal_value):,} vs a ₹{int(fee):,} fee — losing ₹{int(-roi):,}/yr."
+            verdict = f"Rewards ₹{int(optimal_value):,}{perk_suffix} vs ₹{int(fee):,} fee — still losing ₹{int(-roi):,}/yr."
 
         cards_out.append({
             "card_name": name, "bank_name": card.get("bank_name"),
@@ -1106,6 +1163,8 @@ def rewards_analysis(user_id: str):
             "fee_waiver_spend": int(waiver),
             "waiver_progress_pct": min(100, round(routed_spend / waiver * 100)) if waiver > 0 else 100,
             "roi": int(roi),
+            "perks_value": int(perks_value),
+            "perks_note": perks_note,
             "reward_type": card.get("reward_type", "points"),
             "point_value_rs": card.get("point_value_rs", 1.0),
             "projected_points": int(optimal_value / float(card.get("point_value_rs", 1.0) or 1.0)),
