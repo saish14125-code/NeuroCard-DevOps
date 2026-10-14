@@ -19,15 +19,16 @@ pipeline {
         }
 
         stage('Deploy to Nginx') {
-    steps {
-        bat '''
-            if not exist "C:\\nginx\\html" mkdir "C:\\nginx\\html"
-            robocopy "credit-ai-ui\\build" "C:\\nginx\\html" /E
-            if %ERRORLEVEL% GEQ 8 exit /b %ERRORLEVEL%
-            exit /b 0
-        '''
+            steps {
+                bat '''
+                    if not exist "C:\\nginx\\html" mkdir "C:\\nginx\\html"
+                    robocopy "credit-ai-ui\\build" "C:\\nginx\\html" /E
+                    if %ERRORLEVEL% GEQ 8 exit /b %ERRORLEVEL%
+                    exit /b 0
+                '''
+            }
+        }
     }
-}
 
     post {
         success {
