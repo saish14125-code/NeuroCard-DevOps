@@ -13,7 +13,7 @@ pipeline {
         stage('Build React Application') {
             steps {
                 dir('credit-ai-ui') {
-                    bat 'npm run build'
+                    bat 'set CI=false&& npm run build'
                 }
             }
         }
